@@ -1,0 +1,670 @@
+// Sample pre-populated notebook data incorporating user's retrieved Google Workspace notebooks
+const INITIAL_NOTEBOOK = [
+  {
+    id: "chunk-nlm-01",
+    notebookId: "nb-indexing-framework",
+    docId: "doc-nlm-framework",
+    title: "NotebookLM Indexing & Analysis Framework",
+    section_path: "Framework > Operating Logic",
+    content: "This framework is a structured indexing system designed to maximize what Google NotebookLM can extract from a large corpus of original writing, sermons, essays, and research. Annotated, tagged, and contextualized documents produce systemic analysis.",
+    vectorScore: 0.96,
+    ftsRank: -9.2
+  },
+  {
+    id: "chunk-nlm-02",
+    notebookId: "nb-indexing-framework",
+    docId: "doc-nlm-framework",
+    title: "Universal Document Header Template",
+    section_path: "Framework > Preparation Protocol",
+    content: "Paste metadata at top of files: TITLE, TYPE, DATE, PLATFORM, AUDIENCE, TONE, PRIMARY/SECONDARY THEMES, KEY ARGUMENT, CORE TENSION, and REPURPOSING VECTORS (Sermon, Social, Song Lyric, Long-form).",
+    vectorScore: 0.91,
+    ftsRank: -8.0
+  },
+  {
+    id: "chunk-nlm-03",
+    notebookId: "nb-ops-manual",
+    docId: "doc-nlm-ops",
+    title: "Agent Notebook LM Ops Manual",
+    section_path: "Ops Manual > Strategic Architect",
+    content: "Agent Notebook LM is the Strategic Blueprint Agent. Its singular mission is to convert a high-level abstract concept or chaotic stream of consciousness into a formalized, executable protocol for other specialized AI agents (Anvil Protocol, Midi Syndicate).",
+    vectorScore: 0.94,
+    ftsRank: -8.8
+  },
+  {
+    id: "chunk-nlm-04",
+    notebookId: "nb-judge-pack",
+    docId: "doc-nlm-eval",
+    title: "Notebook LM Evaluation Schema & Scoring Rubric",
+    section_path: "Evaluation > Rubric",
+    content: "Scoring rubric attributes (1-10): Clarity, Utility (DAW/MIDI application), Modularity, Emotional Intelligence (lyric-driven composition), and Technical Accuracy. Compares submissions section-by-section using standard tags.",
+    vectorScore: 0.89,
+    ftsRank: -7.5
+  },
+  {
+    id: "chunk-nlm-05",
+    notebookId: "nb-gospel-grey",
+    docId: "doc-gospel-grey",
+    title: "The Gospel of Grey - Theme & Reflection",
+    section_path: "The Gospel of Grey > Core Themes",
+    content: "Explores street spirituality, grace in non-binary moral spaces, resilient faith through hardship, and authentic narrative prose.",
+    vectorScore: 0.86,
+    ftsRank: -5.4
+  },
+  {
+    id: "chunk-nlm-06",
+    notebookId: "nb-love-loss",
+    docId: "doc-love-loss",
+    title: "Love, Loss, and Resilience: A Journey Through Despair",
+    section_path: "Resilience > Chapter 1",
+    content: "A deep narrative journey through grief, personal recovery, identity transformation, and building resilience out of emotional wreckage.",
+    vectorScore: 0.88,
+    ftsRank: -6.1
+  },
+  {
+    id: "chunk-101",
+    notebookId: "nb-tech-docs",
+    docId: "doc-cf-workers",
+    title: "Cloudflare Workers Overview",
+    section_path: "Docs > Workers > Runtime",
+    content: "Cloudflare Workers provides a serverless execution environment that allows you to create entirely new applications or augment existing ones without configuring or maintaining infrastructure.",
+    vectorScore: 0.82,
+    ftsRank: -4.8
+  },
+  {
+    id: "chunk-102",
+    notebookId: "nb-tech-docs",
+    docId: "doc-cf-vectorize",
+    title: "Vectorize DB Integration",
+    section_path: "Docs > Vectorize > Querying",
+    content: "Vectorize is Cloudflare's global vector database. It enables building full-text vector search and similarity retrieval into Workers applications using bge-large-en-v1.5 embeddings.",
+    vectorScore: 0.88,
+    ftsRank: -6.2
+  }
+];
+
+export default function HybridSearchWorkbench() {
+  const [chunks, setChunks] = useState(INITIAL_NOTEBOOK);
+  const [searchQuery, setSearchQuery] = useState("NotebookLM indexing analysis framework scoring rubric");
+  const [alpha, setAlpha] = useState(0.7); // 70% vector, 30% lexical
+  const [topK, setTopK] = useState(5);
+  const [activeTab, setActiveTab] = useState('search');
+  const [notebookId, setNotebookId] = useState("ALL"); // 'ALL' or specific ID
+
+  const showToast = (msg) => {
+    setToastMessage(msg);
+    setTimeout(() => setToastMessage(null), 3000);
+  };
+
+  // Hybrid Search Simulator Logic (RRF + Alpha Weighting across ALL Notebooks)
+  const searchResults = useMemo(() => {
+    if (!searchQuery.trim()) return [];
+
+    const queryTerms = searchQuery.toLowerCase().split(/\s+/).filter(Boolean);
+
+    // Filter by notebook scope ('ALL' queries across all stored notebooks)
+    const filteredChunks = notebookId === "ALL" 
+      ? chunks 
+      : chunks.filter(c => c.notebookId === notebookId);
+
+    // 1. Calculate Vector & FTS Scores
+    const scoredChunks = filteredChunks.map(chunk => {
+      let matchCount = 0;
+      const text = (chunk.content + " " + chunk.title + " " + chunk.section_path).toLowerCase();
+      queryTerms.forEach(term => {
+        if (text.includes(term)) matchCount++;
+      });
+
+      const mockVecSim = Math.min(0.98, 0.40 + (matchCount / (queryTerms.length || 1)) * 0.55);
+      const mockFtsRank = matchCount > 0 ? -(matchCount * 4.0 + Math.random()) : 0;
+
+      return {
+        ...chunk,
+        simVec: mockVecSim,
+        simFts: mockFtsRank,
+        hasLexicalMatch: matchCount > 0
+      };
+    });
+
+    const vectorSorted = [...scoredChunks].sort((a, b) => b.simVec - a.simVec);
+    const ftsSorted = [...scoredChunks]
+      .filter(c => c.hasLexicalMatch)
+      .sort((a, b) => a.simFts - b.simFts);
+
+    const k = 60;
+    const rrfMap = new Map();
+
+    vectorSorted.forEach((item, index) => {
+      const vecRankScore = alpha * (1 / (k + index + 1));
+      rrfMap.set(item.id, {
+        chunk: item,
+        vectorRank: index + 1,
+        ftsRank: null,
+        score: vecRankScore,
+        vecContrib: vecRankScore
+      });
+    });
+
+    ftsSorted.forEach((item, index) => {
+      const ftsRankScore = (1 - alpha) * (1 / (k + index + 1));
+      const existing = rrfMap.get(item.id) || {
+        chunk: item,
+        vectorRank: null,
+        ftsRank: null,
+        score: 0,
+        vecContrib: 0
+      };
+      existing.ftsRank = index + 1;
+      existing.score += ftsRankScore;
+      existing.ftsContrib = ftsRankScore;
+      rrfMap.set(item.id, existing);
+    });
+
+    return Array.from(rrfMap.values())
+      .sort((a, b) => b.score - a.score)
+      .slice(0, topK);
+  }, [chunks, searchQuery, alpha, topK, notebookId]);
+
+  // Unique list of notebooks in the database
+  const availableNotebooks = useMemo(() => {
+    const set = new Set(chunks.map(c => c.notebookId));
+    return ["ALL", ...Array.from(set)];
+  }, [chunks]);
+
+  const handleIndexChunk = (e) => {
+    e.preventDefault();
+    if (!newContent.trim()) return;
+
+    setIsIndexing(true);
+    setTimeout(() => {
+      const targetNb = notebookId === "ALL" ? "nb-user-notebook" : notebookId;
+      const newChunk = {
+        id: `chunk-${Date.now().toString().slice(-4)}`,
+        notebookId: targetNb,
+        docId: newDocId || "doc-custom",
+        title: newDocId.replace("doc-", "").replace("-", " ").toUpperCase(),
+        section_path: newSection || "General",
+        content: newContent,
+        vectorScore: 0.88,
+        ftsRank: -5.0
+      };
+
+      setChunks(prev => [newChunk, ...prev]);
+      setNewContent('');
+      setIsIndexing(false);
+      showToast("Indexed new chunk into all notebook indices!");
+    }, 600);
+  };
+
+  const handleDeleteChunk = (id) => {
+    setChunks(chunks.filter(c => c.id !== id));
+    showToast("Removed chunk from Vectorize and D1 storage.");
+  };
+
+  return (
+    <div className="min-h-screen bg-slate-950 text-slate-100 font-sans flex flex-col selection:bg-orange-500 selection:text-white">
+      {/* Top Header */}
+      <header className="border-b border-slate-800/80 bg-slate-950/90 backdrop-blur sticky top-0 z-50 px-6 py-4 flex flex-col sm:flex-row items-center justify-between gap-4 shadow-xl">
+        <div className="flex items-center gap-3">
+          <div className="p-2.5 bg-gradient-to-br from-orange-500/20 to-amber-500/10 border border-orange-500/30 rounded-xl text-orange-400 shadow-inner">
+            <Zap className="w-6 h-6" />
+          </div>
+          <div>
+            <h1 className="text-xl font-extrabold bg-gradient-to-r from-orange-400 via-amber-300 to-yellow-500 bg-clip-text text-transparent">
+              Multi-Notebook Hybrid Search Engine
+            </h1>
+            <p className="text-xs text-slate-400">Aggregated Vectorize + D1 Search across all NotebookLM corpora</p>
+          </div>
+        </div>
+
+        {/* Navigation Tabs */}
+        <div className="flex bg-slate-900/90 p-1 rounded-xl border border-slate-800 text-xs sm:text-sm shadow-inner">
+          <button
+            onClick={() => setActiveTab('search')}
+            className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-all ${
+              activeTab === 'search' ? 'bg-orange-500 text-white shadow-lg shadow-orange-500/20' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
+            }`}
+          >
+            <Search className="w-4 h-4" /> Global Search
+          </button>
+          <button
+            onClick={() => setActiveTab('index')}
+            className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-all ${
+              activeTab === 'index' ? 'bg-orange-500 text-white shadow-lg shadow-orange-500/20' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
+            }`}
+          >
+            <Database className="w-4 h-4" /> Notebook Store ({chunks.length})
+          </button>
+          <button
+            onClick={() => setActiveTab('code')}
+            className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-all ${
+              activeTab === 'code' ? 'bg-orange-500 text-white shadow-lg shadow-orange-500/20' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
+            }`}
+          >
+            <Code className="w-4 h-4" /> Retriever API
+          </button>
+        </div>
+      </header>
+
+      {/* Main Content Area */}
+      <main className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 grid grid-cols-1 gap-6">
+        {toastMessage && (
+          <div className="fixed bottom-6 right-6 z-50 flex items-center gap-2 bg-emerald-500 text-slate-950 px-4 py-3 rounded-xl font-semibold shadow-2xl border border-emerald-400 animate-bounce">
+            <CheckCircle className="w-5 h-5" /> {toastMessage}
+          </div>
+        )}
+
+        {/* TAB 1: HYBRID SEARCH INTERFACE */}
+        {activeTab === 'search' && (
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            {/* Search Settings Panel */}
+            <div className="lg:col-span-1 bg-slate-900/80 border border-slate-800 rounded-2xl p-5 flex flex-col gap-6 h-fit shadow-lg">
+              <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+                <span className="flex items-center gap-2 font-semibold text-slate-200 text-sm">
+                  <Sliders className="w-4 h-4 text-orange-400" /> RRF Fusion Parameters
+                </span>
+                <span className="text-xs bg-slate-800 px-2 py-1 rounded-md text-orange-300 font-mono border border-slate-700">k = 60</span>
+              </div>
+
+              {/* Notebook Scope Selection */}
+              <div className="space-y-2">
+                <label className="text-xs text-slate-400 flex items-center justify-between">
+                  <span>Target Notebook Scope</span>
+                  <BookOpen className="w-3.5 h-3.5 text-orange-400" />
+                </label>
+                <select
+                  value={notebookId}
+                  onChange={(e) => setNotebookId(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200 outline-none focus:border-orange-500/50 font-mono"
+                >
+                  {availableNotebooks.map(nb => (
+                    <option key={nb} value={nb}>
+                      {nb === 'ALL' ? '🌐 All Notebooks (Global Corpus)' : `📓 ${nb}`}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Alpha Balance Slider */}
+              <div className="space-y-3">
+                <div className="flex justify-between items-center text-xs">
+                  <span className="text-slate-400">Ratio (&alpha;)</span>
+                  <span className="font-mono font-bold text-orange-400 bg-orange-950/40 px-2 py-0.5 rounded border border-orange-500/30">
+                    {(alpha * 100).toFixed(0)}% Vector / {((1 - alpha) * 100).toFixed(0)}% Lexical
+                  </span>
+                </div>
+                <input
+                  type="range"
+                  min="0"
+                  max="1"
+                  step="0.05"
+                  value={alpha}
+                  onChange={(e) => setAlpha(parseFloat(e.target.value))}
+                  className="w-full accent-orange-500 bg-slate-800 rounded-lg h-2 cursor-pointer"
+                />
+                <div className="flex justify-between text-[10px] text-slate-400 font-mono">
+                  <span>0.0 (Lexical)</span>
+                  <span>0.5 (Balanced)</span>
+                  <span>1.0 (Vector)</span>
+                </div>
+              </div>
+
+              {/* Top K selector */}
+              <div className="space-y-2">
+                <label className="text-xs text-slate-400 flex justify-between">
+                  <span>Top K Limit</span>
+                  <span className="font-mono text-slate-200 font-bold">{topK}</span>
+                </label>
+                <div className="grid grid-cols-4 gap-2">
+                  {[3, 5, 8, 12].map(k => (
+                    <button
+                      key={k}
+                      onClick={() => setTopK(k)}
+                      className={`py-2 rounded-xl text-xs font-mono border transition-all ${
+                        topK === k 
+                          ? 'bg-orange-500/20 border-orange-500 text-orange-300 font-bold shadow-md shadow-orange-500/10' 
+                          : 'bg-slate-950 border-slate-800 text-slate-400 hover:bg-slate-800'
+                      }`}
+                    >
+                      K={k}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Execution Summary Box */}
+              <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-2">
+                <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider block">Corpus Status</span>
+                <div className="text-xs space-y-2 text-slate-300 font-mono">
+                  <div className="flex justify-between">
+                    <span className="text-slate-400">Total Notebooks:</span>
+                    <span className="text-orange-400 font-medium">{availableNotebooks.length - 1}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-400">Total Chunks:</span>
+                    <span className="text-emerald-400 font-medium">{chunks.length}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-400">Active Scope:</span>
+                    <span className="text-blue-400 font-medium">{notebookId}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Search Results Display */}
+            <div className="lg:col-span-2 space-y-4">
+              {/* Query Input Bar */}
+              <div className="relative">
+                <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-orange-400 w-5 h-5" />
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="Search across all notebooks (e.g. rubrics, evaluation, gospel of grey, resilience)..."
+                  className="w-full bg-slate-900 border border-slate-800 focus:border-orange-500/70 rounded-2xl pl-12 pr-4 py-3.5 text-sm text-slate-100 placeholder-slate-500 outline-none transition-all shadow-inner focus:ring-2 focus:ring-orange-500/20"
+                />
+              </div>
+
+              {/* RRF Results Feed */}
+              <div className="space-y-3">
+                <div className="flex justify-between items-center text-xs text-slate-400 px-1">
+                  <span className="font-semibold text-slate-300">Hybrid Results ({searchResults.length})</span>
+                  <span className="font-mono">Notebook RRF Ranking</span>
+                </div>
+
+                {searchResults.length === 0 ? (
+                  <div className="bg-slate-900/50 border border-slate-800 rounded-2xl p-12 text-center text-slate-500 space-y-2">
+                    <Search className="w-8 h-8 mx-auto stroke-1 text-slate-600" />
+                    <p className="text-sm">No matching notebook chunks found across selected target scope.</p>
+                  </div>
+                ) : (
+                  searchResults.map((item, rankIndex) => {
+                    const chunk = item.chunk;
+                    return (
+                      <div 
+                        key={chunk.id} 
+                        className="bg-slate-900/90 border border-slate-800/90 rounded-2xl p-5 hover:border-slate-700 transition-all space-y-3 shadow-md"
+                      >
+                        {/* Rank Badge */}
+                        <div className="flex justify-between items-start">
+                          <div className="flex items-center gap-3">
+                            <span className="flex items-center justify-center w-7 h-7 rounded-xl bg-orange-500/20 text-orange-400 font-mono text-xs font-bold border border-orange-500/30">
+                              #{rankIndex + 1}
+                            </span>
+                            <div>
+                              <div className="flex items-center gap-2">
+                                <h3 className="text-sm font-semibold text-slate-100">{chunk.title}</h3>
+                                <span className="text-[10px] bg-slate-950 border border-slate-800 text-orange-300 px-2 py-0.5 rounded-md font-mono">
+                                  {chunk.notebookId}
+                                </span>
+                              </div>
+                              <p className="text-[11px] font-mono text-slate-400">{chunk.section_path}</p>
+                            </div>
+                          </div>
+                          <span className="text-xs font-mono bg-slate-950 border border-slate-800 text-slate-200 px-3 py-1 rounded-xl shadow-inner">
+                            RRF: <strong className="text-orange-400">{item.score.toFixed(4)}</strong>
+                          </span>
+                        </div>
+
+                        {/* Text Content */}
+                        <p className="text-xs text-slate-300 leading-relaxed font-sans bg-slate-950/80 p-3.5 rounded-xl border border-slate-800/80">
+                          {chunk.content}
+                        </p>
+
+                        {/* Breakdown Metrics Footer */}
+                        <div className="flex flex-wrap items-center gap-4 text-[11px] font-mono pt-2 text-slate-400 border-t border-slate-800/80">
+                          <div className="flex items-center gap-1.5">
+                            <Cpu className="w-3.5 h-3.5 text-blue-400" />
+                            <span>Vector Rank:</span>
+                            <span className="text-slate-200 font-semibold">
+                              {item.vectorRank ? `#${item.vectorRank}` : 'N/A'}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-1.5">
+                            <Layers className="w-3.5 h-3.5 text-amber-400" />
+                            <span>FTS5 Rank:</span>
+                            <span className="text-slate-200 font-semibold">
+                              {item.ftsRank ? `#${item.ftsRank}` : 'No Keyword Match'}
+                            </span>
+                          </div>
+                          <div className="ml-auto text-[10px] text-slate-500">
+                            Doc: {chunk.docId}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* TAB 2: INDEXING & MANAGEMENT ENGINE */}
+        {activeTab === 'index' && (
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            {/* Form to Index New Chunk */}
+            <div className="lg:col-span-1 bg-slate-900/80 border border-slate-800 rounded-2xl p-5 space-y-4 shadow-lg">
+              <div className="border-b border-slate-800 pb-3">
+                <h2 className="text-sm font-semibold text-slate-100 flex items-center gap-2">
+                  <Plus className="w-4 h-4 text-orange-400" /> Add Chunk to Notebook
+                </h2>
+                <p className="text-xs text-slate-400">Generate BGE embeddings & insert into Vectorize + D1</p>
+              </div>
+
+              <form onSubmit={handleIndexChunk} className="space-y-4">
+                <div className="space-y-1.5">
+                  <label className="text-xs text-slate-400">Target Notebook ID</label>
+                  <input
+                    type="text"
+                    value={notebookId === "ALL" ? "nb-custom-notebook" : notebookId}
+                    onChange={(e) => setNotebookId(e.target.value)}
+                    required
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200 outline-none focus:border-orange-500/50 font-mono"
+                    placeholder="nb-sermons-and-essays"
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-xs text-slate-400">Document ID</label>
+                  <input
+                    type="text"
+                    value={newDocId}
+                    onChange={(e) => setNewDocId(e.target.value)}
+                    required
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200 outline-none focus:border-orange-500/50 font-mono"
+                    placeholder="doc-user-guide"
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-xs text-slate-400">Section Path</label>
+                  <input
+                    type="text"
+                    value={newSection}
+                    onChange={(e) => setNewSection(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200 outline-none focus:border-orange-500/50 font-mono"
+                    placeholder="Guide > Getting Started"
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-xs text-slate-400">Chunk Content Text</label>
+                  <textarea
+                    value={newContent}
+                    onChange={(e) => setNewContent(e.target.value)}
+                    required
+                    rows={5}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs text-slate-200 outline-none focus:border-orange-500/50 resize-none font-sans"
+                    placeholder="Type or paste notebook content snippet..."
+                  />
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={isIndexing}
+                  className="w-full bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-slate-950 font-bold py-2.5 rounded-xl text-xs flex items-center justify-center gap-2 transition-all shadow-md hover:shadow-orange-500/20 disabled:opacity-50"
+                >
+                  {isIndexing ? (
+                    <>
+                      <RefreshCw className="w-4 h-4 animate-spin" /> Embedding Chunk...
+                    </>
+                  ) : (
+                    <>
+                      <Sparkles className="w-4 h-4" /> Index into Corpus
+                    </>
+                  )}
+                </button>
+              </form>
+            </div>
+
+            {/* Existing Stored Chunks Table */}
+            <div className="lg:col-span-2 bg-slate-900/80 border border-slate-800 rounded-2xl p-5 space-y-4 shadow-lg">
+              <div className="flex justify-between items-center border-b border-slate-800 pb-3">
+                <div>
+                  <h2 className="text-sm font-semibold text-slate-100 flex items-center gap-2">
+                    <List className="w-4 h-4 text-orange-400" /> Active Notebook Corpus Chunks
+                  </h2>
+                  <p className="text-xs text-slate-400">All registered chunks across all notebook files</p>
+                </div>
+                <span className="text-xs font-mono bg-slate-950 text-slate-300 border border-slate-800 px-3 py-1 rounded-xl">
+                  {chunks.length} Chunks Total
+                </span>
+              </div>
+
+              <div className="space-y-3 max-h-[600px] overflow-y-auto pr-1">
+                {chunks.map(chunk => (
+                  <div key={chunk.id} className="bg-slate-950/80 border border-slate-800 rounded-xl p-4 flex flex-col gap-2">
+                    <div className="flex justify-between items-start">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-[10px] font-mono text-orange-400 uppercase tracking-wide">
+                            {chunk.docId} &bull; {chunk.section_path}
+                          </span>
+                          <span className="text-[10px] bg-slate-800 text-slate-300 font-mono px-2 py-0.5 rounded">
+                            {chunk.notebookId}
+                          </span>
+                        </div>
+                        <h4 className="text-xs font-semibold text-slate-100 mt-1">{chunk.title}</h4>
+                      </div>
+                      <button
+                        onClick={() => handleDeleteChunk(chunk.id)}
+                        className="text-slate-500 hover:text-red-400 p-1.5 rounded-lg transition-colors hover:bg-slate-800"
+                        title="Delete chunk from Vectorize and D1"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+
+                    <p className="text-xs text-slate-300 line-clamp-2">{chunk.content}</p>
+
+                    <div className="flex justify-between items-center text-[10px] font-mono text-slate-500 pt-2 border-t border-slate-800/80">
+                      <span>Chunk ID: {chunk.id}</span>
+                      <span>Notebook: {chunk.notebookId}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* TAB 3: BACKEND ARCHITECTURE & TYPESCRIPT CODE */}
+        {activeTab === 'code' && (
+          <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-6 space-y-4 shadow-lg">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-4">
+              <div>
+                <h2 className="text-sm font-semibold text-slate-100 flex items-center gap-2">
+                  <Server className="w-4 h-4 text-orange-400" /> Cloudflare Hybrid Search Implementation
+                </h2>
+                <p className="text-xs text-slate-400">
+                  Global Multi-Notebook Hybrid Search Query Implementation
+                </p>
+              </div>
+            </div>
+
+            <pre className="bg-slate-950 border border-slate-800 p-4 rounded-xl font-mono text-xs text-amber-200/90 overflow-x-auto leading-relaxed shadow-inner">
+{`// Cloudflare Global Multi-Notebook Retriever Implementation
+
+export interface HybridSearchQuery {
+  query: string;
+  notebookId?: string; // Optional: Pass specific notebook ID or omit for global search
+  topK?: number;
+  alpha?: number;
+}
+
+export class CloudflareHybridRetriever {
+  constructor(private env: Env) {}
+
+  async search(params: HybridSearchQuery) {
+    const topK = params.topK ?? 5;
+    const alpha = params.alpha ?? 0.7;
+
+    const ftsQuery = params.notebookId && params.notebookId !== 'ALL'
+      ? this.env.DB.prepare(
+          \`SELECT id, content, rank FROM chunks_fts 
+           WHERE chunks_fts MATCH ? AND notebook_id = ? 
+           ORDER BY rank LIMIT ?\`
+        ).bind(params.query, params.notebookId, topK * 2)
+      : this.env.DB.prepare(
+          \`SELECT id, content, rank FROM chunks_fts 
+           WHERE chunks_fts MATCH ? 
+           ORDER BY rank LIMIT ?\`
+        ).bind(params.query, topK * 2);
+
+    const [aiResponse, ftsResults] = await Promise.all([
+      this.env.AI.run('@cf/baai/bge-large-en-v1.5', { text: [params.query] }) as Promise<{ data: number[][] }>,
+      ftsQuery.all()
+    ]);
+
+    const queryVector = aiResponse.data[0];
+
+    const filter = params.notebookId && params.notebookId !== 'ALL' 
+      ? { notebook_id: params.notebookId } 
+      : undefined;
+
+    const vectorResults = await this.env.VECTOR_INDEX.query(queryVector, {
+      topK: topK * 2,
+      filter,
+      returnMetadata: 'all'
+    });
+
+    const rrfScores = new Map<string, number>();
+    const k = 60;
+
+    vectorResults.matches.forEach((match, index) => {
+      const score = alpha * (1 / (k + index + 1));
+      rrfScores.set(match.id, (rrfScores.get(match.id) || 0) + score);
+    });
+
+    const ftsRows = ftsResults.results as Array<{ id: string; content: string; rank: number }>;
+    ftsRows.forEach((row, index) => {
+      const score = (1 - alpha) * (1 / (k + index + 1));
+      rrfScores.set(row.id, (rrfScores.get(row.id) || 0) + score);
+    });
+
+    const sortedChunkIds = Array.from(rrfScores.entries())
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, topK)
+      .map(([id]) => id);
+
+    if (sortedChunkIds.length === 0) return [];
+
+    const placeholders = sortedChunkIds.map(() => '?').join(',');
+    const hydrationQuery = \`SELECT id, notebook_id, doc_id, content, section_path FROM chunks WHERE id IN (\${placeholders})\`;
+    
+    const { results: finalChunks } = await this.env.DB.prepare(hydrationQuery)
+      .bind(...sortedChunkIds)
+      .all();
+
+    const chunkMap = new Map(finalChunks.map((c: any) => [c.id, c]));
+    return sortedChunkIds.map(id => chunkMap.get(id)).filter(Boolean);
+  }
+}`}
+            </pre>
+          </div>
+        )}
+      </main>
+    </div>
+  );
+}
