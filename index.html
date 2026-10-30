@@ -94,7 +94,7 @@
           <div class="stat mono"><span style="color:#94a3b8">Total Chunks:</span><span id="statChunks" style="color:#34d399">8</span></div>
           <div class="stat mono"><span style="color:#94a3b8">Active Scope:</span><span id="statScope" style="color:#60a5fa">ALL</span></div>
         </div>
-        <p class="note" style="margin:14px 0 0">Local demo: search runs in your browser over the sample corpus below. It is not yet connected to a live Vectorize index or D1 database — see the Retriever API tab and <span class="mono">Deployment Guide.md</span> in this repo for the backend version.</p>
+        <p class="note" style="margin:14px 0 0" id="modeNote">Local demo: search runs in your browser over the sample corpus below. It is not yet connected to a live Vectorize index or D1 database — see the Retriever API tab and <span class="mono">Deployment Guide.md</span> in this repo for the backend version. To go live, set WORKER_URL in this page's source to the deployed Worker URL.</p>
       </div>
 
       <div>
@@ -236,6 +236,58 @@ var INITIAL_NOTEBOOK = [
 var chunks = INITIAL_NOTEBOOK.slice();
 var alpha = 0.7, topK = 5, notebookId = "ALL";
 
+// Live backend: set this to the deployed Worker URL after `wrangler deploy`,
+// e.g. "https://notebook-hybrid-search.<your-subdomain>.workers.dev".
+// Leave it empty ("") and search stays in local demo mode.
+var WORKER_URL = "";
+var liveTimer = null, liveSeq = 0;
+
+function scheduleLiveSearch(){
+  if (liveTimer) clearTimeout(liveTimer);
+  liveTimer = setTimeout(doLiveSearch, 300);
+}
+
+async function doLiveSearch(){
+  var q = document.getElementById("query").value.trim();
+  var mySeq = ++liveSeq;
+  var box = document.getElementById("results");
+  if(!q){
+    document.getElementById("resultCount").textContent = 0;
+    box.innerHTML = '<div class="empty">🔍<p>Type a query to search the live backend.</p></div>';
+    return;
+  }
+  try {
+    var resp = await fetch(WORKER_URL.replace(/\/$/, "") + "/api/search", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ query: q, notebookId: notebookId, topK: topK, alpha: alpha })
+    });
+    if(!resp.ok) throw new Error("Worker returned HTTP " + resp.status);
+    var data = await resp.json();
+    if(mySeq !== liveSeq) return;
+    var items = data.results || [];
+    document.getElementById("resultCount").textContent = items.length;
+    if(!items.length){
+      box.innerHTML = '<div class="empty">🔍<p>No matching notebook chunks found across selected target scope.</p></div>';
+      return;
+    }
+    box.innerHTML = items.map(function(r, i){
+      return '<div class="result"><div class="row" style="align-items:flex-start">'
+        + '<div style="display:flex;gap:12px;align-items:flex-start"><span class="rank">#' + (i+1) + '</span><div>'
+        + '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center"><h3>' + esc(r.title || r.section_path || r.id) + '</h3><span class="badge mono">' + esc(r.notebook_id) + '</span><span class="badge mono">LIVE</span></div>'
+        + '<p class="mono" style="font-size:11px;color:#94a3b8;margin:4px 0 0">' + esc(r.section_path || "") + '</p></div></div>'
+        + '<span class="pill mono">RRF: <strong style="color:#fb923c">' + Number(r.rrfScore || 0).toFixed(4) + '</strong></span></div>'
+        + '<p class="content">' + esc(r.content) + '</p>'
+        + '<div class="meta mono"><span>🔵 Vector Rank: <strong style="color:#e2e8f0">' + (r.vectorRank ? ("#" + r.vectorRank) : "N/A") + '</strong></span>'
+        + '<span>🟡 FTS5 Rank: <strong style="color:#e2e8f0">' + (r.ftsRank ? ("#" + r.ftsRank) : "No Keyword Match") + '</strong></span>'
+        + '<span style="margin-left:auto">Doc: ' + esc(r.doc_id) + '</span></div></div>';
+    }).join("");
+  } catch(e){
+    if(mySeq !== liveSeq) return;
+    box.innerHTML = '<div class="empty">🔍<p>Live search failed: ' + esc(e.message) + ' — check WORKER_URL, that the Worker is deployed, and that /api/seed has run.</p></div>';
+  }
+}
+
 function esc(s){ return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
 function toast(msg){ var t=document.getElementById("toast"); t.textContent=msg; t.style.display="block"; setTimeout(function(){ t.style.display="none"; }, 3000); }
 
@@ -311,8 +363,21 @@ function render(){
     kb.appendChild(b);
   });
 
-  // results
-  var res=searchResults(), box=document.getElementById("results");
+  // mode note
+  var modeNote=document.getElementById("modeNote");
+  if(modeNote){
+    modeNote.textContent = WORKER_URL
+      ? "Live mode: search calls the deployed Worker (Vectorize + D1). The Corpus Status panel and Notebook Store tab still show the local demo corpus — store adds/deletes do not affect the live backend."
+      : "Local demo: search runs in your browser over the sample corpus below. It is not yet connected to a live Vectorize index or D1 database — see the Retriever API tab and Deployment Guide.md in this repo for the backend version. To go live, set WORKER_URL in this page's source to the deployed Worker URL.";
+  }
+
+  // results: live backend when WORKER_URL is set, demo simulator otherwise
+  var box=document.getElementById("results");
+  if(WORKER_URL){
+    box.innerHTML='<div class="empty">🔍<p>Searching live backend…</p></div>';
+    scheduleLiveSearch();
+  } else {
+  var res=searchResults();
   document.getElementById("resultCount").textContent=res.length;
   if(!res.length){
     box.innerHTML='<div class="empty">🔍<p>No matching notebook chunks found across selected target scope.</p></div>';
@@ -330,6 +395,7 @@ function render(){
         +'<span style="margin-left:auto">Doc: '+esc(c.docId)+'</span></div></div>';
     }).join("");
   }
+  } // end demo-results else
 
   // chunk list
   var list=document.getElementById("chunkList");

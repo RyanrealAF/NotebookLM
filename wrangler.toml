@@ -1,0 +1,37 @@
+# Cloudflare Worker for the NotebookLM Hybrid Search Engine.
+# Deploy with: wrangler deploy
+# BEFORE DEPLOYING: replace YOUR_D1_DATABASE_ID_HERE with the real
+# database_id for notebook-db (shown on the database's overview page
+# in the Cloudflare dashboard, or in the output of `wrangler d1 create`).
+# BEFORE SEEDING: create the Vectorize index, then the metadata index
+# for notebook_id, otherwise notebook-scoped vector search cannot filter:
+#   wrangler vectorize create notebook-vector-index --dimensions=1024 --metric=cosine
+#   wrangler vectorize create-metadata-index notebook-vector-index --property-name=notebook_id --type=string
+# AFTER DEPLOYING: set WORKER_URL in index.html to the deployed Worker
+# URL (https://notebook-hybrid-search.<your-subdomain>.workers.dev),
+# then push index.html so the Pages site calls the live backend.
+
+name = "notebook-hybrid-search"
+main = "src/index.ts"
+compatibility_date = "2026-10-30"
+
+# Workers AI binding for BGE embeddings (1024 dimensions)
+[ai]
+binding = "AI"
+
+# D1 Database binding (schema in schema.sql; already applied via dashboard).
+# IMPORTANT for the existing notebook-db: it was created from the guide
+# schema (repo file schema.spl), which has NO title column. Before seeding,
+# run this once in the D1 console, or /api/seed inserts will fail:
+#   ALTER TABLE chunks ADD COLUMN title TEXT;
+[[d1_databases]]
+binding = "DB"
+database_name = "notebook-db"
+database_id = "YOUR_D1_DATABASE_ID_HERE"
+
+# Vectorize Index binding.
+# NOTE: binding is VECTOR_INDEX, not VECTORIZE. The retriever code calls
+# env.VECTOR_INDEX, so the binding name and the code must match.
+[[vectorize]]
+binding = "VECTOR_INDEX"
+index_name = "notebook-vector-index"
