@@ -1,0 +1,377 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Multi-Notebook Hybrid Search Engine</title>
+<style>
+  *{box-sizing:border-box}
+  body{margin:0;background:#020617;color:#f1f5f9;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+  header{border-bottom:1px solid #1e293b;background:rgba(2,6,23,.95);padding:16px 24px;display:flex;flex-wrap:wrap;gap:16px;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:50}
+  h1{margin:0;font-size:20px;font-weight:800;background:linear-gradient(90deg,#fb923c,#fcd34d,#facc15);-webkit-background-clip:text;background-clip:text;color:transparent}
+  .sub{font-size:12px;color:#94a3b8;margin-top:2px}
+  .tabs{display:flex;background:#0f172a;padding:4px;border-radius:12px;border:1px solid #1e293b;gap:4px}
+  .tabs button{border:0;background:transparent;color:#94a3b8;padding:8px 14px;border-radius:8px;cursor:pointer;font-size:13px}
+  .tabs button.active{background:#f97316;color:#fff}
+  main{max-width:80rem;margin:0 auto;padding:20px;width:100%}
+  .grid{display:grid;grid-template-columns:1fr;gap:20px}
+  @media(min-width:1024px){.grid.search{grid-template-columns:1fr 2fr}.grid.index{grid-template-columns:1fr 2fr}}
+  .card{background:rgba(15,23,42,.85);border:1px solid #1e293b;border-radius:16px;padding:20px}
+  label{font-size:12px;color:#94a3b8;display:block;margin-bottom:6px}
+  input[type=text],select,textarea{width:100%;background:#020617;border:1px solid #1e293b;border-radius:12px;padding:10px 12px;color:#e2e8f0;font-size:13px;font-family:inherit;outline:none}
+  input[type=text]:focus,select:focus,textarea:focus{border-color:rgba(249,115,22,.6)}
+  textarea{resize:vertical}
+  input[type=range]{width:100%;accent-color:#f97316}
+  .row{display:flex;justify-content:space-between;align-items:center;gap:8px}
+  .mono{font-family:ui-monospace,Menlo,Consolas,monospace}
+  .pill{font-size:11px;background:#020617;border:1px solid #334155;color:#fdba74;padding:4px 8px;border-radius:8px}
+  .kbtns{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+  .kbtns button{background:#020617;border:1px solid #1e293b;color:#94a3b8;padding:9px;border-radius:12px;cursor:pointer;font-size:12px}
+  .kbtns button.active{background:rgba(249,115,22,.2);border-color:#f97316;color:#fdba74;font-weight:700}
+  .stat{display:flex;justify-content:space-between;font-size:12px;padding:4px 0}
+  .searchbar{position:relative}
+  .searchbar input{padding-left:42px;padding-top:14px;padding-bottom:14px;font-size:14px}
+  .searchbar span{position:absolute;left:14px;top:50%;transform:translateY(-50%)}
+  .result{background:rgba(15,23,42,.9);border:1px solid #1e293b;border-radius:16px;padding:18px}
+  .result h3{margin:0;font-size:14px}
+  .badge{font-size:11px;background:#020617;border:1px solid #334155;color:#fdba74;padding:3px 8px;border-radius:8px;white-space:nowrap}
+  .rank{width:28px;height:28px;border-radius:10px;background:rgba(249,115,22,.2);color:#fb923c;display:inline-flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;border:1px solid rgba(249,115,22,.3);flex:none}
+  .content{background:rgba(2,6,23,.8);border:1px solid #1e293b;border-radius:12px;padding:14px;font-size:13px;line-height:1.6;color:#cbd5e1}
+  .meta{display:flex;flex-wrap:wrap;gap:16px;font-size:11px;color:#94a3b8;border-top:1px solid #1e293b;padding-top:10px}
+  .btn{width:100%;background:linear-gradient(90deg,#f97316,#f59e0b);color:#020617;font-weight:800;border:0;padding:11px;border-radius:12px;cursor:pointer;font-size:13px}
+  .btn:disabled{opacity:.5}
+  .del{background:transparent;border:0;color:#64748b;cursor:pointer;font-size:16px;padding:4px}
+  .del:hover{color:#f87171}
+  .empty{background:rgba(15,23,42,.5);border:1px solid #1e293b;border-radius:16px;padding:48px;text-align:center;color:#64748b;font-size:14px}
+  pre{background:#020617;border:1px solid #1e293b;border-radius:12px;padding:16px;overflow-x:auto;font-size:12px;line-height:1.6;color:#fcd34d}
+  #toast{position:fixed;bottom:24px;right:24px;z-index:99;background:#10b981;color:#020617;padding:12px 16px;border-radius:12px;font-weight:600;font-size:14px;display:none;box-shadow:0 10px 30px rgba(0,0,0,.5)}
+  .note{font-size:12px;color:#94a3b8;line-height:1.6}
+  .field{margin-bottom:16px}
+  .chunklist{max-height:600px;overflow-y:auto;padding-right:4px;display:flex;flex-direction:column;gap:12px}
+  .hidden{display:none}
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>Multi-Notebook Hybrid Search Engine</h1>
+    <div class="sub">Aggregated Vectorize + D1 Search across all NotebookLM corpora</div>
+  </div>
+  <nav class="tabs" aria-label="Workbench tabs">
+    <button id="tab-search" class="active" onclick="showTab('search')">🔍 Global Search</button>
+    <button id="tab-index" onclick="showTab('index')">🗄️ Notebook Store (<span id="storeCount">8</span>)</button>
+    <button id="tab-code" onclick="showTab('code')">💻 Retriever API</button>
+  </nav>
+</header>
+
+<main>
+  <div id="toast" role="status"></div>
+
+  <!-- SEARCH TAB -->
+  <section id="view-search">
+    <div class="grid search">
+      <div class="card" style="height:fit-content">
+        <div class="row" style="border-bottom:1px solid #1e293b;padding-bottom:12px">
+          <strong style="font-size:14px">⚙️ RRF Fusion Parameters</strong>
+          <span class="pill mono">k = 60</span>
+        </div>
+        <div class="field" style="margin-top:18px">
+          <label for="scope">Target Notebook Scope</label>
+          <select id="scope"></select>
+        </div>
+        <div class="field">
+          <div class="row"><label style="margin:0" for="alpha">Ratio (&alpha;)</label><span class="pill mono" id="alphaLabel">70% Vector / 30% Lexical</span></div>
+          <input type="range" id="alpha" min="0" max="1" step="0.05" value="0.7">
+          <div class="row mono" style="font-size:10px;color:#64748b"><span>0.0 (Lexical)</span><span>0.5 (Balanced)</span><span>1.0 (Vector)</span></div>
+        </div>
+        <div class="field">
+          <label>Top K Limit — <span class="mono" id="topKLabel" style="color:#e2e8f0;font-weight:700">5</span></label>
+          <div class="kbtns" id="kbtns"></div>
+        </div>
+        <div class="card" style="background:#020617">
+          <div style="font-size:11px;font-weight:600;color:#94a3b8;text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">Corpus Status</div>
+          <div class="stat mono"><span style="color:#94a3b8">Total Notebooks:</span><span id="statNotebooks" style="color:#fb923c">5</span></div>
+          <div class="stat mono"><span style="color:#94a3b8">Total Chunks:</span><span id="statChunks" style="color:#34d399">8</span></div>
+          <div class="stat mono"><span style="color:#94a3b8">Active Scope:</span><span id="statScope" style="color:#60a5fa">ALL</span></div>
+        </div>
+        <p class="note" style="margin:14px 0 0">Local demo: search runs in your browser over the sample corpus below. It is not yet connected to a live Vectorize index or D1 database — see the Retriever API tab and <span class="mono">Deployment Guide.md</span> in this repo for the backend version.</p>
+      </div>
+
+      <div>
+        <div class="searchbar">
+          <span>🔍</span>
+          <input type="text" id="query" value="NotebookLM indexing analysis framework scoring rubric" placeholder="Search across all notebooks (e.g. rubrics, evaluation, gospel of grey, resilience)...">
+        </div>
+        <div class="row" style="font-size:12px;color:#94a3b8;padding:14px 4px 8px">
+          <strong style="color:#e2e8f0">Hybrid Results (<span id="resultCount">0</span>)</strong>
+          <span class="mono">Notebook RRF Ranking</span>
+        </div>
+        <div id="results" style="display:flex;flex-direction:column;gap:12px"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- INDEX TAB -->
+  <section id="view-index" class="hidden">
+    <div class="grid index">
+      <div class="card" style="height:fit-content">
+        <h2 style="font-size:14px;margin:0 0 4px">➕ Add Chunk to Notebook</h2>
+        <p class="note" style="margin:0 0 16px">Adds to the in-browser corpus for this session.</p>
+        <form id="addForm">
+          <div class="field"><label for="fNotebook">Target Notebook ID</label><input type="text" id="fNotebook" class="mono" placeholder="nb-sermons-and-essays" required></div>
+          <div class="field"><label for="fDoc">Document ID</label><input type="text" id="fDoc" class="mono" placeholder="doc-user-guide" required></div>
+          <div class="field"><label for="fSection">Section Path</label><input type="text" id="fSection" class="mono" placeholder="Guide > Getting Started"></div>
+          <div class="field"><label for="fContent">Chunk Content Text</label><textarea id="fContent" rows="5" placeholder="Type or paste notebook content snippet..." required></textarea></div>
+          <button class="btn" id="addBtn" type="submit">✨ Index into Corpus</button>
+        </form>
+      </div>
+      <div class="card">
+        <div class="row" style="border-bottom:1px solid #1e293b;padding-bottom:12px">
+          <div><h2 style="font-size:14px;margin:0">📋 Active Notebook Corpus Chunks</h2><p class="note" style="margin:2px 0 0">All registered chunks across all notebook files</p></div>
+          <span class="pill mono"><span id="storeCount2">8</span> Chunks Total</span>
+        </div>
+        <div class="chunklist" id="chunkList" style="margin-top:16px"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- CODE TAB -->
+  <section id="view-code" class="hidden">
+    <div class="card">
+      <h2 style="font-size:14px;margin:0 0 4px">🖥️ Cloudflare Hybrid Search Implementation</h2>
+      <p class="note" style="margin:0 0 16px">Global Multi-Notebook Hybrid Search Query Implementation — the backend retriever described in Deployment Guide.md. This page's search tab is a browser simulator of the same RRF logic (k = 60, alpha-weighted).</p>
+      <pre>// Cloudflare Global Multi-Notebook Retriever Implementation
+
+export interface HybridSearchQuery {
+  query: string;
+  notebookId?: string; // Optional: Pass specific notebook ID or omit for global search
+  topK?: number;
+  alpha?: number;
+}
+
+export class CloudflareHybridRetriever {
+  constructor(private env: Env) {}
+
+  async search(params: HybridSearchQuery) {
+    const topK = params.topK ?? 5;
+    const alpha = params.alpha ?? 0.7;
+
+    const ftsQuery = params.notebookId &amp;&amp; params.notebookId !== 'ALL'
+      ? this.env.DB.prepare(
+          `SELECT id, content, rank FROM chunks_fts
+           WHERE chunks_fts MATCH ? AND notebook_id = ?
+           ORDER BY rank LIMIT ?`
+        ).bind(params.query, params.notebookId, topK * 2)
+      : this.env.DB.prepare(
+          `SELECT id, content, rank FROM chunks_fts
+           WHERE chunks_fts MATCH ?
+           ORDER BY rank LIMIT ?`
+        ).bind(params.query, topK * 2);
+
+    const [aiResponse, ftsResults] = await Promise.all([
+      this.env.AI.run('@cf/baai/bge-large-en-v1.5', { text: [params.query] }),
+      ftsQuery.all()
+    ]);
+
+    const queryVector = aiResponse.data[0];
+
+    const filter = params.notebookId &amp;&amp; params.notebookId !== 'ALL'
+      ? { notebook_id: params.notebookId }
+      : undefined;
+
+    const vectorResults = await this.env.VECTOR_INDEX.query(queryVector, {
+      topK: topK * 2,
+      filter,
+      returnMetadata: 'all'
+    });
+
+    const rrfScores = new Map();
+    const k = 60;
+
+    vectorResults.matches.forEach((match, index) =&gt; {
+      const score = alpha * (1 / (k + index + 1));
+      rrfScores.set(match.id, (rrfScores.get(match.id) || 0) + score);
+    });
+
+    const ftsRows = ftsResults.results;
+    ftsRows.forEach((row, index) =&gt; {
+      const score = (1 - alpha) * (1 / (k + index + 1));
+      rrfScores.set(row.id, (rrfScores.get(row.id) || 0) + score);
+    });
+
+    const sortedChunkIds = Array.from(rrfScores.entries())
+      .sort((a, b) =&gt; b[1] - a[1])
+      .slice(0, topK)
+      .map(([id]) =&gt; id);
+
+    if (sortedChunkIds.length === 0) return [];
+
+    const placeholders = sortedChunkIds.map(() =&gt; '?').join(',');
+    const hydrationQuery = `SELECT id, notebook_id, doc_id, content, section_path FROM chunks WHERE id IN (${placeholders})`;
+
+    const { results: finalChunks } = await this.env.DB.prepare(hydrationQuery)
+      .bind(...sortedChunkIds)
+      .all();
+
+    const chunkMap = new Map(finalChunks.map((c) =&gt; [c.id, c]));
+    return sortedChunkIds.map(id =&gt; chunkMap.get(id)).filter(Boolean);
+  }
+}</pre>
+    </div>
+  </section>
+</main>
+
+<script>
+var INITIAL_NOTEBOOK = [
+  {id:"chunk-nlm-01",notebookId:"nb-indexing-framework",docId:"doc-nlm-framework",title:"NotebookLM Indexing & Analysis Framework",section_path:"Framework > Operating Logic",content:"This framework is a structured indexing system designed to maximize what Google NotebookLM can extract from a large corpus of original writing, sermons, essays, and research. Annotated, tagged, and contextualized documents produce systemic analysis.",vectorScore:0.96,ftsRank:-9.2},
+  {id:"chunk-nlm-02",notebookId:"nb-indexing-framework",docId:"doc-nlm-framework",title:"Universal Document Header Template",section_path:"Framework > Preparation Protocol",content:"Paste metadata at top of files: TITLE, TYPE, DATE, PLATFORM, AUDIENCE, TONE, PRIMARY/SECONDARY THEMES, KEY ARGUMENT, CORE TENSION, and REPURPOSING VECTORS (Sermon, Social, Song Lyric, Long-form).",vectorScore:0.91,ftsRank:-8.0},
+  {id:"chunk-nlm-03",notebookId:"nb-ops-manual",docId:"doc-nlm-ops",title:"Agent Notebook LM Ops Manual",section_path:"Ops Manual > Strategic Architect",content:"Agent Notebook LM is the Strategic Blueprint Agent. Its singular mission is to convert a high-level abstract concept or chaotic stream of consciousness into a formalized, executable protocol for other specialized AI agents (Anvil Protocol, Midi Syndicate).",vectorScore:0.94,ftsRank:-8.8},
+  {id:"chunk-nlm-04",notebookId:"nb-judge-pack",docId:"doc-nlm-eval",title:"Notebook LM Evaluation Schema & Scoring Rubric",section_path:"Evaluation > Rubric",content:"Scoring rubric attributes (1-10): Clarity, Utility (DAW/MIDI application), Modularity, Emotional Intelligence (lyric-driven composition), and Technical Accuracy. Compares submissions section-by-section using standard tags.",vectorScore:0.89,ftsRank:-7.5},
+  {id:"chunk-nlm-05",notebookId:"nb-gospel-grey",docId:"doc-gospel-grey",title:"The Gospel of Grey - Theme & Reflection",section_path:"The Gospel of Grey > Core Themes",content:"Explores street spirituality, grace in non-binary moral spaces, resilient faith through hardship, and authentic narrative prose.",vectorScore:0.86,ftsRank:-5.4},
+  {id:"chunk-nlm-06",notebookId:"nb-love-loss",docId:"doc-love-loss",title:"Love, Loss, and Resilience: A Journey Through Despair",section_path:"Resilience > Chapter 1",content:"A deep narrative journey through grief, personal recovery, identity transformation, and building resilience out of emotional wreckage.",vectorScore:0.88,ftsRank:-6.1},
+  {id:"chunk-101",notebookId:"nb-tech-docs",docId:"doc-cf-workers",title:"Cloudflare Workers Overview",section_path:"Docs > Workers > Runtime",content:"Cloudflare Workers provides a serverless execution environment that allows you to create entirely new applications or augment existing ones without configuring or maintaining infrastructure.",vectorScore:0.82,ftsRank:-4.8},
+  {id:"chunk-102",notebookId:"nb-tech-docs",docId:"doc-cf-vectorize",title:"Vectorize DB Integration",section_path:"Docs > Vectorize > Querying",content:"Vectorize is Cloudflare's global vector database. It enables building full-text vector search and similarity retrieval into Workers applications using bge-large-en-v1.5 embeddings.",vectorScore:0.88,ftsRank:-6.2}
+];
+
+var chunks = INITIAL_NOTEBOOK.slice();
+var alpha = 0.7, topK = 5, notebookId = "ALL";
+
+function esc(s){ return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
+function toast(msg){ var t=document.getElementById("toast"); t.textContent=msg; t.style.display="block"; setTimeout(function(){ t.style.display="none"; }, 3000); }
+
+function showTab(name){
+  ["search","index","code"].forEach(function(n){
+    document.getElementById("view-"+n).classList.toggle("hidden", n!==name);
+    document.getElementById("tab-"+n).classList.toggle("active", n===name);
+  });
+}
+
+function availableNotebooks(){
+  var seen={}, out=["ALL"];
+  chunks.forEach(function(c){ if(!seen[c.notebookId]){ seen[c.notebookId]=1; out.push(c.notebookId); } });
+  return out;
+}
+
+function searchResults(){
+  var q = document.getElementById("query").value.trim();
+  if(!q) return [];
+  var terms = q.toLowerCase().split(/\s+/).filter(Boolean);
+  var filtered = notebookId==="ALL" ? chunks : chunks.filter(function(c){ return c.notebookId===notebookId; });
+  var scored = filtered.map(function(chunk){
+    var matchCount=0, text=(chunk.content+" "+chunk.title+" "+chunk.section_path).toLowerCase();
+    terms.forEach(function(term){ if(text.indexOf(term)!==-1) matchCount++; });
+    return { chunk: chunk,
+      simVec: Math.min(0.98, 0.40 + (matchCount/(terms.length||1))*0.55),
+      simFts: matchCount>0 ? -(matchCount*4.0) : 0,
+      hasLexicalMatch: matchCount>0 };
+  });
+  var vectorSorted = scored.slice().sort(function(a,b){ return b.simVec-a.simVec; });
+  var ftsSorted = scored.filter(function(c){ return c.hasLexicalMatch; }).sort(function(a,b){ return a.simFts-b.simFts; });
+  var k=60, map={};
+  vectorSorted.forEach(function(item,i){
+    var s = alpha*(1/(k+i+1));
+    map[item.chunk.id]={chunk:item.chunk,vectorRank:i+1,ftsRank:null,score:s,vecContrib:s};
+  });
+  ftsSorted.forEach(function(item,i){
+    var s = (1-alpha)*(1/(k+i+1));
+    var e = map[item.chunk.id] || {chunk:item.chunk,vectorRank:null,ftsRank:null,score:0,vecContrib:0};
+    e.ftsRank=i+1; e.score+=s; e.ftsContrib=s; map[item.chunk.id]=e;
+  });
+  return Object.keys(map).map(function(id){ return map[id]; }).sort(function(a,b){ return b.score-a.score; }).slice(0,topK);
+}
+
+function render(){
+  // scope select
+  var sel=document.getElementById("scope"), prev=sel.value;
+  var nbs=availableNotebooks();
+  sel.innerHTML="";
+  nbs.forEach(function(nb){
+    var o=document.createElement("option"); o.value=nb;
+    o.textContent = nb==="ALL" ? "🌐 All Notebooks (Global Corpus)" : "📓 "+nb;
+    sel.appendChild(o);
+  });
+  sel.value = nbs.indexOf(notebookId)!==-1 ? notebookId : "ALL";
+  notebookId = sel.value;
+  document.getElementById("fNotebook").value = notebookId==="ALL" ? "nb-custom-notebook" : notebookId;
+
+  document.getElementById("alphaLabel").textContent = Math.round(alpha*100)+"% Vector / "+Math.round((1-alpha)*100)+"% Lexical";
+  document.getElementById("topKLabel").textContent = topK;
+  document.getElementById("statNotebooks").textContent = nbs.length-1;
+  document.getElementById("statChunks").textContent = chunks.length;
+  document.getElementById("statScope").textContent = notebookId;
+  document.getElementById("storeCount").textContent = chunks.length;
+  document.getElementById("storeCount2").textContent = chunks.length;
+
+  // topK buttons
+  var kb=document.getElementById("kbtns"); kb.innerHTML="";
+  [3,5,8,12].forEach(function(k){
+    var b=document.createElement("button"); b.type="button"; b.textContent="K="+k;
+    if(k===topK) b.className="active";
+    b.onclick=function(){ topK=k; render(); };
+    kb.appendChild(b);
+  });
+
+  // results
+  var res=searchResults(), box=document.getElementById("results");
+  document.getElementById("resultCount").textContent=res.length;
+  if(!res.length){
+    box.innerHTML='<div class="empty">🔍<p>No matching notebook chunks found across selected target scope.</p></div>';
+  } else {
+    box.innerHTML=res.map(function(item,i){
+      var c=item.chunk;
+      return '<div class="result"><div class="row" style="align-items:flex-start">'
+        +'<div style="display:flex;gap:12px;align-items:flex-start"><span class="rank">#'+(i+1)+'</span><div>'
+        +'<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center"><h3>'+esc(c.title)+'</h3><span class="badge mono">'+esc(c.notebookId)+'</span></div>'
+        +'<p class="mono" style="font-size:11px;color:#94a3b8;margin:4px 0 0">'+esc(c.section_path)+'</p></div></div>'
+        +'<span class="pill mono">RRF: <strong style="color:#fb923c">'+item.score.toFixed(4)+'</strong></span></div>'
+        +'<p class="content">'+esc(c.content)+'</p>'
+        +'<div class="meta mono"><span>🔵 Vector Rank: <strong style="color:#e2e8f0">'+(item.vectorRank?("#"+item.vectorRank):"N/A")+'</strong></span>'
+        +'<span>🟡 FTS5 Rank: <strong style="color:#e2e8f0">'+(item.ftsRank?("#"+item.ftsRank):"No Keyword Match")+'</strong></span>'
+        +'<span style="margin-left:auto">Doc: '+esc(c.docId)+'</span></div></div>';
+    }).join("");
+  }
+
+  // chunk list
+  var list=document.getElementById("chunkList");
+  list.innerHTML=chunks.map(function(c){
+    return '<div class="card" style="background:rgba(2,6,23,.8);padding:16px"><div class="row" style="align-items:flex-start">'
+      +'<div><div class="mono" style="font-size:10px;color:#fb923c;text-transform:uppercase">'+esc(c.docId)+' • '+esc(c.section_path)+'</div>'
+      +'<span class="badge mono" style="display:inline-block;margin-top:6px">'+esc(c.notebookId)+'</span>'
+      +'<h4 style="font-size:13px;margin:8px 0 0">'+esc(c.title)+'</h4></div>'
+      +'<button class="del" title="Delete chunk" onclick="deleteChunk(\''+esc(c.id)+'\')">🗑️</button></div>'
+      +'<p style="font-size:13px;color:#cbd5e1;line-height:1.5">'+esc(c.content)+'</p>'
+      +'<div class="row mono" style="font-size:10px;color:#64748b;border-top:1px solid #1e293b;padding-top:8px"><span>Chunk ID: '+esc(c.id)+'</span><span>Notebook: '+esc(c.notebookId)+'</span></div></div>';
+  }).join("");
+}
+
+function deleteChunk(id){
+  chunks=chunks.filter(function(c){ return c.id!==id; });
+  render();
+  toast("Removed chunk from Vectorize and D1 storage.");
+}
+
+document.getElementById("query").addEventListener("input", render);
+document.getElementById("alpha").addEventListener("input", function(e){ alpha=parseFloat(e.target.value); render(); });
+document.getElementById("scope").addEventListener("change", function(e){ notebookId=e.target.value; render(); });
+document.getElementById("addForm").addEventListener("submit", function(e){
+  e.preventDefault();
+  var btn=document.getElementById("addBtn"); btn.disabled=true; btn.textContent="Embedding Chunk...";
+  var nb=document.getElementById("fNotebook").value.trim()||"nb-custom-notebook";
+  var doc=document.getElementById("fDoc").value.trim()||"doc-custom";
+  var section=document.getElementById("fSection").value.trim()||"General";
+  var content=document.getElementById("fContent").value.trim();
+  if(!content){ btn.disabled=false; btn.textContent="✨ Index into Corpus"; return; }
+  setTimeout(function(){
+    var title=doc.replace(/^doc-/,"").replace(/-/g," ").toUpperCase();
+    chunks.unshift({id:"chunk-"+Date.now().toString().slice(-4),notebookId:nb,docId:doc,title:title,section_path:section,content:content,vectorScore:0.88,ftsRank:-5.0});
+    document.getElementById("fContent").value="";
+    btn.disabled=false; btn.textContent="✨ Index into Corpus";
+    render();
+    toast("Indexed new chunk into all notebook indices!");
+  }, 600);
+});
+
+render();
+</script>
+</body>
+</html>
