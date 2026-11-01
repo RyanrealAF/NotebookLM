@@ -15,6 +15,10 @@ export interface Env {
   AI: any;
   DB: any;
   VECTOR_INDEX: any;
+  // Optional Worker secret (wrangler secret put INGEST_TOKEN). When set,
+  // /api/ingest and /api/seed require header X-Ingest-Token to match.
+  // When unset, those endpoints are open, as they are for this demo.
+  INGEST_TOKEN?: string;
 }
 
 export interface HybridSearchQuery {

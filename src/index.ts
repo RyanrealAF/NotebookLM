@@ -2,6 +2,12 @@
 //
 // Endpoints:
 //   POST /api/search  { query, notebookId?, topK?, alpha? } -> { results }
+//   POST /api/ingest  { notebookId, docId, title?, content, section_path? }
+//                     -> { notebookId, docId, title, chunks, ids }
+//     Single-user ingestion: splits markdown by headers at ~400 words
+//     per chunk, embeds them, and upserts to Vectorize + D1.
+//     Re-ingesting the same notebookId + docId replaces that document
+//     (see src/ingest.ts).
 //   POST /api/seed    (no body needed) -> { seeded, ids }
 //     Embeds the 8 sample chunks in src/data.ts with bge-large-en-v1.5,
 //     upserts their vectors into Vectorize (metadata notebook_id, so
@@ -18,6 +24,7 @@
 
 import { CloudflareHybridRetriever, Env, HybridSearchQuery } from "./retriever";
 import { INITIAL_CHUNKS } from "./data";
+import { ingestDocument, IngestInput } from "./ingest";
 
 const EMBEDDING_MODEL = "@cf/baai/bge-large-en-v1.5";
 
@@ -25,7 +32,7 @@ function corsHeaders(): Record<string, string> {
   return {
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Methods": "POST, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type",
+    "Access-Control-Allow-Headers": "Content-Type, X-Ingest-Token",
   };
 }
 
@@ -91,6 +98,34 @@ export default {
       const retriever = new CloudflareHybridRetriever(env);
       const results = await retriever.search(params);
       return json({ results });
+    }
+
+    // Optional write protection: if INGEST_TOKEN is set as a Worker
+    // secret, mutating endpoints require it. Search stays open.
+    const requiresToken =
+      (url.pathname === "/api/seed" || url.pathname === "/api/ingest") &&
+      request.method === "POST";
+    if (requiresToken && env.INGEST_TOKEN && request.headers.get("x-ingest-token") !== env.INGEST_TOKEN) {
+      return json({ error: "Missing or incorrect X-Ingest-Token" }, 401);
+    }
+
+    // Endpoint: POST /api/ingest
+    if (url.pathname === "/api/ingest" && request.method === "POST") {
+      let input: IngestInput;
+      try {
+        input = (await request.json()) as IngestInput;
+      } catch {
+        return json({ error: "Invalid JSON body" }, 400);
+      }
+      try {
+        const result = await ingestDocument(env, input);
+        return json(result);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Ingest failed";
+        const isValidation =
+          /required|exceeds|over the|no chunks/.test(message);
+        return json({ error: message }, isValidation ? 400 : 500);
+      }
     }
 
     // Endpoint: POST /api/seed
